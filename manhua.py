@@ -25,9 +25,7 @@
 
 import requests as rs
 from bs4 import BeautifulSoup as bs
-import os
-import sys
-import shutil
+import os, sys, shutil, threading, re
 
 '''
 	TODO:
@@ -35,6 +33,7 @@ import shutil
 	1. Threading
 	2. Resume from last chapter
 	3. GUI?
+	4. Delay
 
 '''
 
@@ -99,37 +98,71 @@ def ExtractChapters(htmlContent):
 	return htmlContent.find('div', {'class':'c-page__content'}).findAll('a', href=True)
 	
 
-def DownloadChapters(chapters, htmlContent):
+def DownloadChapter(chapter):
 
-	for chapter in chapters:
-		print(f"Downloading {chapter.text.strip()}...")
-		f = open(chapter.text.strip() + ".html", 'w', encoding='utf-8')
+	print(f"Downloading {chapter.text.strip()}...")
+
+	f = open(chapter.text.strip() + ".html", 'w', encoding='utf-8')
 		#f.write(f'<html>\n<h1>{chapter.text.strip()}</h1>\n<meta name="viewport" content="width=device-width, initial-scale=1">\n')
-		try:
-			response = rs.get(chapter['href'])
+	try:
+		response = rs.get(chapter['href'])
 					
-			if(response.status_code == 200):
+		if(response.status_code == 200):
 						
-				content = bs(response.content, 'lxml')
+			content = bs(response.content, 'lxml')
 						
-				paragraphs = content.find('div', {'class':'text-left'})
+			paragraphs = content.find('div', {'class':'text-left'})
 						
-				for paragraph in paragraphs:
+			for paragraph in paragraphs:
 							
-					f.write(str(paragraph))
+				f.write(str(paragraph))
 												
-		except Exception as e:
-			print("Error downloading chapter...")
-			print(e +"\n")
+	except Exception as e:
+		print("Error downloading chapter...")
+		print(e +"\n")
 					
-		f.write("</html>")
-		f.close()
+	f.write("</html>")
+	f.close()
+
+def DownloadChapters(chapters, resume):
+
+	if(resume):
+		lastFile = FindLastChapter(os.getcwd())
+
+		for chapter in chapters:
+			if(chapter.text.strip() + ".html" == lastFile):
+				break
+			DownloadChapter(chapter)
+	else:
+		for chapter in chapters:
+			DownloadChapter(chapter)
+
+		
+		
 
 
+def FindLastChapter(directory):
+
+	print("Finding last chapter...")
+	files = os.listdir(directory)
+	files.sort(reverse = True, key=Match)
+
+	print(files[2])
+	return files[2]			#This is accounting for the cover art and metadate file
+
+
+def atoi(text):
+	return int(text) if text.isdigit() else text
+
+def Match(chapter):
+
+	return [atoi(c) for c in re.split(r'(\d+)', chapter)]
+	
 
 def main(args):
 	
 	url = input("URL: ")
+	resume = False
 	
 	try:
 		response = rs.get(url)
@@ -144,9 +177,11 @@ def main(args):
 			if(os.path.exists(title)):
 				print("Folder already exists... no problem!")
 				os.chdir(title)
+				resume = True
 			else:
 				os.mkdir(title)
 				os.chdir(title)
+			
 			
 			ExtractMetadata(content)
 
@@ -154,25 +189,17 @@ def main(args):
 							
 			chapters = ExtractChapters(content)
 
-			DownloadChapters(chapters, content)
+			DownloadChapters(chapters, resume)
 			
-			
-		
 		else:
 			print("Error: incorrect URL")
+			exit(-1)
 		
 	except Exception as e:
 		print(e)
-		
-	
-	
+		exit(-1)
 		
 	print("Done!")
-	
-	
-			
-	
-	
 	
 	return 0
 
