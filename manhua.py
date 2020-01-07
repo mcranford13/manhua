@@ -28,26 +28,118 @@ from bs4 import BeautifulSoup as bs
 import os
 import sys
 import shutil
-from xml.etree import ElementTree as et
+
+'''
+	TODO:
+
+	1. Threading
+	2. Resume from last chapter
+	3. GUI?
+
+'''
+
+
+def ExtractTitle(htmlContent):
+
+	print('Extracting Title...')
+
+	title = htmlContent.find('div', {'class':'post-title'}).find('h3')
+			
+	if('HOT' in title.text or 'NEW' in title.text):
+		title = title.contents[2].strip()
+	else:
+		title = title.text.strip()
+
+	return title
+
+
+def ExtractMetadata(htmlContent):
+
+	print("Extracting metadata...")
+	metadata = htmlContent.findAll('div', {'class':'post-content_item'})
+	m = open('metadata.xml', 'w')
+	m.write('<?xml version="1.0" encoding="UTF-8"?>\n<metadata>\n')
+			
+	for meta in metadata:
+		heading = meta.find('div', {'class':'summary-heading'}).get_text().strip()
+		data = meta.find('div', {'class':'summary-content'}).get_text().strip()
+				
+		if("(s)" in heading):
+			heading = heading.replace('(s)', "")
+
+		m.write(f"<{heading}>{data}</{heading}>\n")	
+
+	m.write('</metadata>')
+	m.close()
+				
+
+def ExtractCoverArt(htmlContent):
+	print("Extracting cover art...")
+			
+	picUrl = htmlContent.find('div', {'class':'summary_image'}).find('img')
+						
+	try:
+		pic = rs.get(picUrl['src'], stream=True)
+				
+		if(pic.status_code == 200):
+			p = open('cover.jpg', 'wb')
+			pic.raw.decode_content = True
+			shutil.copyfileobj(pic.raw, p)
+					
+			p.close()
+				
+	except Exception as e:
+		print("Error trying to extract image...")
+		print(e +"\n")
+		
+
+def ExtractChapters(htmlContent):
+
+	print('Extracting urls...')
+	return htmlContent.find('div', {'class':'c-page__content'}).findAll('a', href=True)
+	
+
+def DownloadChapters(chapters, htmlContent):
+
+	for chapter in chapters:
+		print(f"Downloading {chapter.text.strip()}...")
+		f = open(chapter.text.strip() + ".html", 'w', encoding='utf-8')
+		#f.write(f'<html>\n<h1>{chapter.text.strip()}</h1>\n<meta name="viewport" content="width=device-width, initial-scale=1">\n')
+		try:
+			response = rs.get(chapter['href'])
+					
+			if(response.status_code == 200):
+						
+				content = bs(response.content, 'lxml')
+						
+				paragraphs = content.find('div', {'class':'text-left'})
+						
+				for paragraph in paragraphs:
+							
+					f.write(str(paragraph))
+												
+		except Exception as e:
+			print("Error downloading chapter...")
+			print(e +"\n")
+					
+		f.write("</html>")
+		f.close()
+
+
 
 def main(args):
 	
 	url = input("URL: ")
 	
 	try:
-		response = rs.get(url);
+		response = rs.get(url)
 		
 		if(response.status_code == 200):
 			
-			print('Extracting Title...')
 			content = bs(response.content, 'lxml')
 			
-			title = content.find('div', {'class':'post-title'}).find('h3')
+			title = ExtractTitle(content)
 			
-			if('HOT' in title.text or 'NEW' in title.text):
-				title = title.contents[2].strip()
-			else:
-				title = title.text.strip()
 				
 			if(os.path.exists(title)):
 				print("Folder already exists... no problem!")
@@ -56,73 +148,15 @@ def main(args):
 				os.mkdir(title)
 				os.chdir(title)
 			
-			
-			
-			print("Extracting metadata...")
-			metadata = content.findAll('div', {'class':'post-content_item'})
-			m = open('metadata.xml', 'w')
-			m.write('<?xml version="1.0" encoding="UTF-8"?>\n<metadata>\n')
-			
-			for meta in metadata:
-				heading = meta.find('div', {'class':'summary-heading'}).get_text().strip()
-				data = meta.find('div', {'class':'summary-content'}).get_text().strip()
-				
-				if("(s)" in heading):
-					heading = heading.replace('(s)', "")
-				
-				m.write(f"<{heading}>{data}</{heading}>\n")
-				
-			
-			m.write('</metadata>')
-			m.close()
-				
-			
-			
-			print("Extracting cover art...")
-			
-			picUrl = content.find('div', {'class':'summary_image'}).find('img')
-						
-			try:
-				pic = rs.get(picUrl['src'], stream=True)
-				
-				if(pic.status_code == 200):
-					p = open('cover.jpg', 'wb')
-					pic.raw.decode_content = True
-					shutil.copyfileobj(pic.raw, p)
-					
-				p.close()
-				
-			except Exception as e:
-				print("Error trying to extract image...")
-				p.close()
-			
+			ExtractMetadata(content)
+
+			ExtractCoverArt(content)
 							
-			print('Extracting urls...')
-			chapterURLS = content.find('div', {'class':'c-page__content'}).findAll('a', href=True)
+			chapters = ExtractChapters(content)
+
+			DownloadChapters(chapters, content)
 			
-			for chapter in chapterURLS:
-				print(f"Downloading {chapter.text.strip()}...")
-				f = open(chapter.text.strip() + ".html", 'w', encoding='utf-8')
-				f.write(f'<html>\n<h1>{chapter.text.strip()}</h1>\n<meta name="viewport" content="width=device-width, initial-scale=1">\n')
-				try:
-					response = rs.get(chapter['href'])
-					
-					if(response.status_code == 200):
-						
-						content = bs(response.content, 'lxml')
-						
-						paragraphs = content.find('div', {'class':'text-left'})
-						
-						for paragraph in paragraphs:
-							
-							f.write(str(paragraph))
-							
-							
-				except Exception as e:
-					print("Error downloading chapter...")
-					
-				f.write("</html>")
-				f.close()
+			
 		
 		else:
 			print("Error: incorrect URL")
