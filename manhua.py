@@ -25,15 +25,14 @@
 
 import requests as rs
 from bs4 import BeautifulSoup as bs
-import os, sys, shutil, threading, re
+from pathlib import Path
+import os, sys, shutil, threading, re, time
 
 '''
 	TODO:
 
 	1. Threading
-	2. Resume from last chapter
 	3. GUI?
-	4. Delay
 
 '''
 
@@ -56,7 +55,7 @@ def ExtractMetadata(htmlContent):
 
 	print("Extracting metadata...")
 	metadata = htmlContent.findAll('div', {'class':'post-content_item'})
-	m = open('metadata.xml', 'w')
+	m = open('metadata.xml', 'w', encoding="utf-8")
 	m.write('<?xml version="1.0" encoding="UTF-8"?>\n<metadata>\n')
 			
 	for meta in metadata:
@@ -100,9 +99,16 @@ def ExtractChapters(htmlContent):
 
 def DownloadChapter(chapter):
 
-	print(f"Downloading {chapter.text.strip()}...")
+	chapTitle = chapter.text.strip()
+	print(f"Downloading {chapTitle}")
 
-	f = open(chapter.text.strip() + ".html", 'w', encoding='utf-8')
+	notAllowed = ['?', '/', '\\', ':', '*', '\"', '<', '>', '|']
+
+	for those in notAllowed:
+		if(those in chapTitle):
+			chapTitle = chapTitle.replace(those, "")
+
+	f = open(chapTitle + ".html", 'w', encoding='utf-8')
 		#f.write(f'<html>\n<h1>{chapter.text.strip()}</h1>\n<meta name="viewport" content="width=device-width, initial-scale=1">\n')
 	try:
 		response = rs.get(chapter['href'])
@@ -124,30 +130,30 @@ def DownloadChapter(chapter):
 	f.write("</html>")
 	f.close()
 
-def DownloadChapters(chapters, resume):
+def DownloadChapters(chapters, resume, delay):
 
 	if(resume):
 		lastFile = FindLastChapter(os.getcwd())
-
+		print("Will proceed to only download the latest chapters...\n")
+		
 		for chapter in chapters:
+			time.sleep(delay)
 			if(chapter.text.strip() + ".html" == lastFile):
 				break
 			DownloadChapter(chapter)
 	else:
 		for chapter in chapters:
+			time.sleep(delay)
 			DownloadChapter(chapter)
 
 		
-		
-
-
 def FindLastChapter(directory):
 
 	print("Finding last chapter...")
 	files = os.listdir(directory)
 	files.sort(reverse = True, key=Match)
 
-	print(files[2])
+	print(f"Last Chapter found is: {files[2]}")
 	return files[2]			#This is accounting for the cover art and metadate file
 
 
@@ -162,8 +168,17 @@ def Match(chapter):
 def main(args):
 	
 	url = input("URL: ")
+	delay = int(input("Delay: "))
 	resume = False
-	
+
+	directory = Path(str(Path.home())) / 'Documents' / 'WebNovels'
+			
+	if(directory.exists()):
+		os.chdir(directory)
+	else:
+		os.mkdir(directory)
+		os.chdir(directory)
+
 	try:
 		response = rs.get(url)
 		
@@ -173,7 +188,6 @@ def main(args):
 			
 			title = ExtractTitle(content)
 			
-				
 			if(os.path.exists(title)):
 				print("Folder already exists... no problem!")
 				os.chdir(title)
@@ -189,7 +203,7 @@ def main(args):
 							
 			chapters = ExtractChapters(content)
 
-			DownloadChapters(chapters, resume)
+			DownloadChapters(chapters, resume, delay)
 			
 		else:
 			print("Error: incorrect URL")
