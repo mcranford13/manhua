@@ -26,17 +26,67 @@
 import requests as rs
 from bs4 import BeautifulSoup as bs
 from pathlib import Path
-import os, sys, shutil, threading, re, time
+import os, sys, shutil, re, time, zipfile
 
 '''
 	TODO:
 
-	1. Threading
-	3. GUI?
+	1. Fix metadata to actually extract and write properly
+	2. Create a function for adding a cover to the epub
+	3. 
 
 '''
 
+def CreateEpub(files, name, htmlContent):
+	print("Creating epub file...")
+	epub = zipfile.ZipFile(name + ".epub", "w")
 
+	epub.writestr("mimetype", "application/epub+zip")
+
+	epub.writestr("META-INF/container.xml", '''<container version="1.0"
+	xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/Content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>''')
+
+	md = ExtractMetadata(htmlContent)
+	metadata = ""
+	manifest = ""
+	spine = ""
+
+	for meta in md:
+
+		if("Author" in meta):
+			metadata += f'<dc:creator id="cre">{md[meta]}</dc:creator><meta refines="#cre" property="role" scheme="marc:relators">aut</meta>>'
+		else:
+			metadata += f'<{meta}>{md[meta]}</{meta}>'
+
+	toc_manifest = '<item href="toc.xhtml" id="toc" properties="nav" media-type="application/xhtml+xml"/>'
+
+	for i, html in enumerate(files):
+		basename = os.path.basename(html)
+		manifest += f'<item id="file_{i + 1}" href="{basename}" media-type="application/xhtml+xml"/>'  
+		spine += f'<itemref idref="file_{i + 1}" />'
+		epub.write(html, "OEBPS/" + basename)
+
+
+	index_tpl = f'''<package version="3.1"
+xmlns="http://www.idpf.org/2007/opf">
+  <metadata>
+    {metadata}
+      </metadata>
+        <manifest>
+         {manifest + toc_manifest}
+        </manifest>
+        <spine>
+          <itemref idref="toc" linear="no"/>
+          {spine}
+        </spine>
+</package>'''
+
+
+	epub.writestr("OEBPS/Content.opf", index_tpl)
 def ExtractTitle(htmlContent):
 
 	print('Extracting Title...')
@@ -53,10 +103,11 @@ def ExtractTitle(htmlContent):
 
 def ExtractMetadata(htmlContent):
 
+	md = {}
 	print("Extracting metadata...")
 	metadata = htmlContent.findAll('div', {'class':'post-content_item'})
-	m = open('metadata.xml', 'w', encoding="utf-8")
-	m.write('<?xml version="1.0" encoding="UTF-8"?>\n<metadata>\n')
+	#m = open('metadata.xml', 'w', encoding="utf-8")
+	#m.write('<?xml version="1.0" encoding="UTF-8"?>\n<metadata>\n')
 			
 	for meta in metadata:
 		heading = meta.find('div', {'class':'summary-heading'}).get_text().strip()
@@ -65,10 +116,13 @@ def ExtractMetadata(htmlContent):
 		if("(s)" in heading):
 			heading = heading.replace('(s)', "")
 
-		m.write(f"<{heading}>{data}</{heading}>\n")	
+		md[heading] = data
+		#m.write(f"<{heading}>{data}</{heading}>\n")	
 
-	m.write('</metadata>')
-	m.close()
+	#m.write('</metadata>')
+	#m.close()
+
+	return md
 				
 
 def ExtractCoverArt(htmlContent):
@@ -94,7 +148,9 @@ def ExtractCoverArt(htmlContent):
 def ExtractChapters(htmlContent):
 
 	print('Extracting urls...')
-	return htmlContent.find('div', {'class':'c-page__content'}).findAll('a', href=True)
+	chapters = htmlContent.find('div', {'class':'c-page__content'}).findAll('a', href=True)
+
+	return chapters
 	
 
 def DownloadChapter(chapter):
@@ -102,14 +158,15 @@ def DownloadChapter(chapter):
 	chapTitle = chapter.text.strip()
 	print(f"Downloading {chapTitle}")
 
-	notAllowed = ['?', '/', '\\', ':', '*', '\"', '<', '>', '|']
+	notAllowed = ['?', '/', '\\', ':', '*', '\"', '<', '>', '|']		#this only for windows & mac operating systems but *shrug*
 
 	for those in notAllowed:
 		if(those in chapTitle):
 			chapTitle = chapTitle.replace(those, "")
 
+
 	f = open(chapTitle + ".html", 'w', encoding='utf-8')
-		#f.write(f'<html>\n<h1>{chapter.text.strip()}</h1>\n<meta name="viewport" content="width=device-width, initial-scale=1">\n')
+	#f.write(f'<html>\n<h1>{chapter.text.strip()}</h1>\n<meta name="viewport" content="width=device-width, initial-scale=1">\n')
 	try:
 		response = rs.get(chapter['href'])
 					
@@ -132,10 +189,14 @@ def DownloadChapter(chapter):
 
 def DownloadChapters(chapters, resume, delay):
 
+	if(delay > 0):
+		print(f"Estimated time: {(len(chapters) * delay) / 60} minutes")
+	else:
+		print(f"Estimated time: {(len(chapters)) / 60} minutes")
+
 	if(resume):
 		lastFile = FindLastChapter(os.getcwd())
-		print("Will proceed to only download the latest chapters...\n")
-		
+	
 		for chapter in chapters:
 			time.sleep(delay)
 			if(chapter.text.strip() + ".html" == lastFile):
@@ -146,15 +207,20 @@ def DownloadChapters(chapters, resume, delay):
 			time.sleep(delay)
 			DownloadChapter(chapter)
 
-		
+	
 def FindLastChapter(directory):
 
 	print("Finding last chapter...")
 	files = os.listdir(directory)
 	files.sort(reverse = True, key=Match)
 
-	print(f"Last Chapter found is: {files[2]}")
-	return files[2]			#This is accounting for the cover art and metadate file
+	if(".epub" in files[2]):
+		os.remove(files[2])
+		print(f"Last Chapter found is: {files[3]}")
+		return files[3]
+	else:
+		print(f"Last Chapter found is: {files[2]}")
+		return files[2]			#This is accounting for the cover art and metadate file
 
 
 def atoi(text):
@@ -171,6 +237,8 @@ def main(args):
 	delay = int(input("Delay: "))
 	resume = False
 
+
+	saveLoc = 	directory = Path(str(Path.home())) / 'Documents' / 'Ebooks'
 	directory = Path(str(Path.home())) / 'Documents' / 'WebNovels'
 			
 	if(directory.exists()):
@@ -197,13 +265,26 @@ def main(args):
 				os.chdir(title)
 			
 			
-			ExtractMetadata(content)
+			#ExtractMetadata(content)
 
 			ExtractCoverArt(content)
 							
 			chapters = ExtractChapters(content)
 
 			DownloadChapters(chapters, resume, delay)
+
+			files = os.listdir(os.getcwd())
+			files.sort(key=Match)
+
+
+			CreateEpub(files, title, content)
+
+			print(f"Moving to {saveLoc}")
+
+			if(os.path.exists(f"{str(saveLoc)}\\{title}.epub")):
+				os.remove(f"{str(saveLoc)}\\{title}.epub")
+
+			os.rename(f"{title}.epub", f"{str(saveLoc)}\\{title}.epub")
 			
 		else:
 			print("Error: incorrect URL")
@@ -213,7 +294,7 @@ def main(args):
 		print(e)
 		exit(-1)
 		
-	print("Done!")
+	print("All Finished, Enjoy!")
 	
 	return 0
 
